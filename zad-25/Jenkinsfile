@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+
+    environment {
+        // Zmień na własne repozytorium w rejestrze Docker
+        IMAGE_NAME  = 'twoj-uzytkownik/moja-aplikacja'
+        // ID danych logowania do rejestru, dodanych w Jenkins (Manage Jenkins > Credentials)
+        REGISTRY_CREDENTIALS = 'dockerhub-credentials'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'npm test'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'
+            }
+        }
+
+        stage('Build Docker image') {
+            steps {
+                sh 'docker build -t $IMAGE_NAME:$BUILD_NUMBER -t $IMAGE_NAME:latest .'
+            }
+        }
+
+        stage('Push Docker image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: env.REGISTRY_CREDENTIALS,
+                    usernameVariable: 'REGISTRY_USER',
+                    passwordVariable: 'REGISTRY_PASS'
+                )]) {
+                    sh '''
+                        echo "$REGISTRY_PASS" | docker login -u "$REGISTRY_USER" --password-stdin
+                        docker push $IMAGE_NAME:$BUILD_NUMBER
+                        docker push $IMAGE_NAME:latest
+                        docker logout
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline zakończony sukcesem. Obraz: $IMAGE_NAME:$BUILD_NUMBER"
+        }
+        failure {
+            echo 'Pipeline zakończony błędem.'
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
